@@ -1,10 +1,11 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
 #include <zbar.h>
 #include <iostream>
 #include <fstream>
 #include <string>
-
+#include <time.h>
 using namespace std;
 using namespace cv;
 using namespace zbar;
@@ -18,7 +19,7 @@ private:
     ImageScanner scanner;
 
 public:
-    Mat frame;
+    Mat frame, reference_frame, gray_frame, frame_delta;
     Image zbar_image;
     CloudCam(int deviceID, int apiID)
     {
@@ -42,14 +43,14 @@ public:
     {
         // read camera output in frame
         cap >> frame;
+        // converts frame to grayscale and stores it in gray_frame
+        cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
     }
 
     int detectQR()
     {
         // Converting frame to grayscale for better output
-        Mat gray_frame;
 
-        cvtColor(frame, gray_frame, COLOR_BGR2GRAY);
         int width = gray_frame.cols;
         int height = gray_frame.rows;
         uchar *raw = (uchar *)(gray_frame.data);
@@ -77,10 +78,49 @@ public:
             cout << "Unable to write contents to file";
     }
 
+    void captureReferenceFrame()
+    {
+        // Initializing reference frame to detect motion using backgroound subrtraction method
+        cap >> reference_frame;
+        cvtColor(reference_frame, reference_frame, COLOR_BGR2GRAY);
+        // Used to smooth the edges to reduce noise
+        GaussianBlur(reference_frame, reference_frame, Size(21, 21), 0);
+    }
+
+    void detectMotion()
+    {
+        vector<vector<Point>> cnts;
+
+        GaussianBlur(gray_frame, gray_frame, Size(21, 21), 0);
+
+        // compute difference between first frame and current frame
+        absdiff(reference_frame, gray_frame, frame_delta);
+
+        // converts pixels above 25 to white
+        threshold(frame_delta, frame_delta, 25, 255, THRESH_BINARY);
+
+        dilate(frame_delta, frame_delta, Mat(), Point(-1, -1), 2);
+
+        findContours(frame_delta, cnts, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+        for (int i = 0; i < cnts.size(); i++)
+        {
+
+            if (contourArea(cnts[i]) < 500)
+            {
+                continue;
+            }
+            drawContours(frame, cnts, i, Scalar(0, 255, 0), 2);
+
+            cout << "Motion Detected" << endl;
+            putText(frame, "Motion Detected", Point(10, 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 0, 255), 2);
+        }
+    }
+
     void stop()
     {
         destroyAllWindows();
         cap.release();
+        exit(0);
     }
 };
 
@@ -91,7 +131,7 @@ int main()
 
     // Initializing opencv window
     namedWindow("Output", WINDOW_NORMAL);
-    resizeWindow("Output", 640, 480);
+    resizeWindow("Output", 240, 480);
     while (true)
     {
         cc.captureFrame();
@@ -107,12 +147,37 @@ int main()
             cout << data << endl;
             cc.writeToFile("wpa_supplicant.conf", data);
 
-            break;
+            // check validation of qr code. if true then break the loop
+            if (true)
+                break;
         }
 
         imshow("Output", cc.frame);
-        waitKey(30);
+        if (waitKey(1) == 27)
+        {
+            cc.stop(); // Exit if ESC is pressed
+        }
     }
-    // Release camera
+
+    // Detect motion after qr code validation
+    namedWindow("Bgr Difference", WINDOW_NORMAL);
+    resizeWindow("Bgr Difference", 240, 480);
+    while (true)
+    {
+        cc.captureReferenceFrame();
+        cc.captureFrame();
+        cc.detectMotion();
+
+        // This should run after some seconds
+
+        imshow("Output", cc.frame);
+        imshow("Bgr Difference", cc.frame_delta);
+
+        if (waitKey(1) == 27)
+        {
+            cc.stop(); // Exit if ESC is pressed
+        }
+    }
+    // Release camera and destory all windows
     cc.stop();
 }
