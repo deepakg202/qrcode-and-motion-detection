@@ -1,4 +1,4 @@
-# QR Code Scanner C++
+# QR Code And Motion Detection
 ## Usage (For Debian/Ubuntu): 
 - Open terminal and execute `sudo apt-get install libopencv-dev libzbar-dev`
 - Clone the repo
